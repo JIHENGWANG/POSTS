@@ -9,10 +9,16 @@ import (
 	"log"
 	"strconv"
 	"reflect"
-	"context"
+	//"context"
 	"cloud.google.com/go/storage"
-	"cloud.google.com/go/bigtable"
+	"github.com/auth0/go-jwt-middleware"
+	"github.com/dgrijalva/jwt-go"
+	"github.com/gorilla/mux"
+	//"cloud.google.com/go/bigtable"
 	"io"
+	"context"
+
+
 )
 
 const (
@@ -23,7 +29,7 @@ const (
 	PROJECT_ID = "around-194922"
 	BT_INSTANCE = "around-post"
 	// Needs to update this URL if you deploy it to cloud.
-	ES_URL = "http://35.196.206.25:9200"
+	ES_URL = "http://35.227.74.17:9200"
 	// Needs to update this bucket based on your gcs bucket name.
 	BUCKET_NAME = "post-images-1234567"
 
@@ -42,7 +48,7 @@ type Post struct {
 	Location Location `json:"location"`
 	Url    string `json:"url"`
 }
-
+var mySigningKey = []byte("secret")
 func main() {
 	// Create a client
 	client, err := elastic.NewClient(elastic.SetURL(ES_URL), elastic.SetSniff(false))
@@ -77,10 +83,24 @@ func main() {
 		}
 	}
 
-	fmt.Println("started-service")
-	http.HandleFunc("/post", handlerPost)
-	http.HandleFunc("/search", handlerSearch)
+	var jwtMiddleware = jwtmiddleware.New(jwtmiddleware.Options{
+		ValidationKeyGetter: func(token *jwt.Token) (interface{}, error) {
+			return mySigningKey, nil
+		},
+		SigningMethod: jwt.SigningMethodHS256,
+	})
+
+	r := mux.NewRouter()
+	r.Handle("/post", jwtMiddleware.Handler(http.HandlerFunc(handlerPost))).Methods("POST")
+	r.Handle("/search", jwtMiddleware.Handler(http.HandlerFunc(handlerSearch))).Methods("GET")
+	r.Handle("/login", http.HandlerFunc(loginHandler)).Methods("POST")
+	r.Handle("/signup", http.HandlerFunc(signupHandler)).Methods("POST")
+
+	http.Handle("/", r)
 	log.Fatal(http.ListenAndServe(":8080", nil))
+
+
+
 }
 
 
@@ -88,6 +108,14 @@ func handlerPost (w http.ResponseWriter, r *http.Request){
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Authorization")
+
+
+	user := r.Context().Value("user")
+	claims := user.(*jwt.Token).Claims
+	username := claims.(jwt.MapClaims)["username"]
+
+
+
 
 
 	// 32 << 20 is the maxMemory param for ParseMultipartForm, equals to 32MB (1MB = 1024 * 1024 bytes = 2^20 bytes)
@@ -100,7 +128,7 @@ func handlerPost (w http.ResponseWriter, r *http.Request){
 	lat, _ := strconv.ParseFloat(r.FormValue("lat"), 64)
 	lon, _ := strconv.ParseFloat(r.FormValue("lon"), 64)
 	p := &Post{
-		User:    "1111",
+		User: username.(string),
 		Message: r.FormValue("message"),
 		Location: Location{
 			Lat: lat,
@@ -119,6 +147,7 @@ func handlerPost (w http.ResponseWriter, r *http.Request){
 	defer file.Close()
 
 	ctx := context.Background()
+	/*
 	// you must update project name here
 	bt_client, err := bigtable.NewClient(ctx, PROJECT_ID, BT_INSTANCE)
 	if err != nil {
@@ -140,7 +169,7 @@ func handlerPost (w http.ResponseWriter, r *http.Request){
 		panic(err)
 		return
 	}
-	fmt.Printf("Post is saved to BigTable: %s\n", p.Message)
+	fmt.Printf("Post is saved to BigTable: %s\n", p.Message)*/
 
 
 	// replace it with your real bucket name.
